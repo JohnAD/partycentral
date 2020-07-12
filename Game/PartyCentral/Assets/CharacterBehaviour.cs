@@ -4,7 +4,38 @@ using UnityEngine;
 
 namespace partycentral {
 
-    enum CharacterRole {
+    public enum GameStages {
+        ChooseLove,      // Choose the character to play as the love interest
+        DayStart,        // Show status and days remaining.
+        PartyChoose,     // Choose party conditions (Rent equipment, invitation count, drink price, etc.)
+        PartyPlay,       // Basic party. Continues until “lights on”. Can flirt or clean during party. 
+                         // When flirting, you can also add to the mess but your status with gfriend rises.
+                         // When light’s on, goes to NIGHT_PARTY_CLEANUP. If reaches 8AM, goes directly to
+                         // PARENTS_HOME. Sidebar shows girlfriend names and status.
+        PartyCleanup,    // House lit up. Guests start to leave. When reaches 8AM or player clicks “go to sleep”,
+                         // goes to PARENTS_HOME. Shows “House is a mess. Better clean up fast.” when any trash is still around.
+        ParentHome,      // One parent walks in front door. One parent (which may be off-screen) walks to first
+                         // trash. Front door parent says “Good Morning!”. If no trash, does to END, otherwise PARENTS_HOME2.
+        ParentScream,    // If any trash, then screen swings to screaming parent. Player notified of random
+                         // number of party days lost.Goes to END.
+        EndGame          // If gfriend status < 0, then the game is over and you lose. If money > $10K, and
+                         // girlfriend status > N, then win. If out of days, then you lose.
+    };
+
+    // public string[] LoveLevelMsgs = {
+    //     "Break up time.",
+    //     "Eh. At least you aren't gross.",
+    //     "You are okay.",
+    //     "I “Like” you.",
+    //     "My heart flutters.",
+    //     "I'm looking forward to more.",
+    //     "I'm willing to use the “L” word.",
+    //     "Wowsa!",
+    //     "I'm head over heels.",
+    //     "One true love.",
+    // };
+
+    public enum CharacterRole {
         ThePlayer,
         LoveInterest,
         Dad,
@@ -13,15 +44,15 @@ namespace partycentral {
         RandomGuest,
     };
 
-    enum CurrentDesire {
-        DesireNothing,
-        DesireDrink,
-        DesireDance,
-        DesireTalk,
-        DesireLeave
+    public enum Desire {
+        Nothing,
+        Drink,
+        Dance,
+        Talk,
+        Leave
     };
 
-    enum CurrentAction {
+    public enum Action {
         Idle,
         Conversation,
         Seeking,
@@ -29,38 +60,39 @@ namespace partycentral {
         MixingDrink,
         Serving,
         Dancing,
-        Wander,
         Leaving,
         Screaming,
         Flirting,             // only done by ThePlayer, so no animation
         Cleaning,             // only done by ThePlayer, so no animation
     };
 
-    enum CurrentAnimation {
-        AnimIdle,             // for Idle
-        AnimMovingSober,      // for Seeking, Wander, Leaving
-        AnimMovingDrunk,      // for Seeking, Wander, Leaving (when InebriationLevel > 3)
-        AnimDrinking,         // for Drinking
-        AnimMixing,           // for Mixing
-        AnimServing           // for Serving
-        AnimDancing,          // for Dancing
-        AnimAnger,            // for Screaming
-        AnimRunning,          // for Leaving (after 8am)
+    public enum AnimationStyle {
+        Idle,             // for Idle
+        MovingSober,      // for Seeking, Wander, Leaving
+        MovingDrunk,      // for Seeking, Wander, Leaving (when InebriationLevel > 3)
+        Drinking,         // for Drinking
+        Mixing,           // for Mixing
+        Serving,          // for Serving
+        Dancing,          // for Dancing
+        Anger,            // for Screaming
+        Running,          // for Leaving (after 8am)
     };
 
     public class CharacterBehavior
     {
 
+        public const float NormalDecisionDuration = 2f;
+
         public CharacterRole Role;
         public int ConversationTarget;
-        public CurrentAction Action;
-        public CurrentDesire Desire;
-        public CurrentAnimation Animation;
+        public Action MyAction;
+        public Desire MyDesire;
+        public AnimationStyle MyAnimation;
         public int InebriationLevel;
         public int SeekTarget;
         public int MovementSpeed;
 
-        private float lastDecisionDuration;
+        private float LastDecisionDuration;
         private float NearDistance = 10f;     // TODO get real values
         private float OkDistance = 20f;       // TODO get real values
         private float AdjacentDistance = 1f;  // TODO get real values
@@ -71,9 +103,9 @@ namespace partycentral {
         {
             Role = role;
             OwnName = ownName;
-            Action = Idle;
-            Desire = DesireNothing;
-            CurrentAnimation = AnimIdle;
+            MyAction = Action.Idle;
+            MyDesire = Desire.Nothing;
+            MyAnimation = AnimationStyle.Idle;
             InebriationLevel = 0; 
             LastDecisionDuration = float.PositiveInfinity;
             MovementSpeed = 0;
@@ -86,17 +118,19 @@ namespace partycentral {
 
             foreach (GameObject target in targets)
             {
-                float dist = Vector3.distance(self.position, target.position);
+                float dist = Vector3.Distance(self.transform.position, target.transform.position);
                 if (dist < minDist) minDist = dist;
             }
 
             return minDist;
         }
 
-        public UpdateDecision() { // called once (and only once) per frame update
+        public void UpdateDecision() { // called once (and only once) per frame update
             // for the moment, we assume an endless party
             GameObject self = GameObject.Find(OwnName);
-            GameObject gs = GameObject.Find("GameState");
+            GameObject gso = GameObject.Find("GameStateGlob"); //
+            GameStateDetail gs = gso.GetComponent<GameStateDetail>();
+
             float distanceToNearestGuest = getDistanceToNearest(self, "RandomGuest");
             float distanceToNearestBar = getDistanceToNearest(self, "Bar");
             float distanceToNearestMusic = getDistanceToNearest(self, "BoomBox");
@@ -106,143 +140,145 @@ namespace partycentral {
                 //
                 // first handle desire
                 //
-                if (Desire == DesireNothing)
+                if (MyDesire == Desire.Nothing)
                 {
-                    CurrentDesire[] possibleDesires = {};
+                    List<Desire> possibleDesires;
                     LastDecisionDuration = 0f;
                     switch (Role)
                     {
-                        case RandomGuest:
-                        case LoveInterest:
+                        case CharacterRole.RandomGuest:
+                        case CharacterRole.LoveInterest:
                             if (gs.isMorning()) {
-                                possibleDesires = {DesireLeave};
+                                possibleDesires = new List<Desire>() {Desire.Leave};
                             } else {
-                                possibleDesires = {DesireDrink, DesireDance, DesireTalk};
-                                if (distanceToNearestGuest < NearDistance) possibleDesires.Add(DesireTalk);
-                                if (distanceToNearestGuest < OkDistance) possibleDesires.Add(DesireTalk);
-                                if (distanceToNearestBar < NearDistance) possibleDesires.Add(DesireDrink);
-                                if (distanceToNearestBar < OkDistance) possibleDesires.Add(DesireDrink);
-                                if (distanceToNearestMusic < NearDistance) possibleDesires.Add(DesireDance);
-                                if (distanceToNearestMusic < OkDistance) possibleDesires.Add(DesireDance);                              
-                                if (gs.isLate()) possibleDesires.Add(DesireLeave);
-                                if (gs.isLate()) possibleDesires.Add(DesireLeave);
-                                if (gs.isVeryLate()) possibleDesires.Add(DesireLeave);
-                                if (gs.isVeryLate()) possibleDesires.Add(DesireLeave);
-                                if (gs.isVeryLate()) possibleDesires.Add(DesireLeave);
-                                if (gs.isVeryLate()) possibleDesires.Add(DesireLeave);
+                                possibleDesires = new List<Desire>() {Desire.Drink, Desire.Dance, Desire.Talk};
+                                if (distanceToNearestGuest < NearDistance) possibleDesires.Add(Desire.Talk);
+                                if (distanceToNearestGuest < OkDistance) possibleDesires.Add(Desire.Talk);
+                                if (distanceToNearestBar < NearDistance) possibleDesires.Add(Desire.Drink);
+                                if (distanceToNearestBar < OkDistance) possibleDesires.Add(Desire.Drink);
+                                if (distanceToNearestMusic < NearDistance) possibleDesires.Add(Desire.Dance);
+                                if (distanceToNearestMusic < OkDistance) possibleDesires.Add(Desire.Dance);                              
+                                if (gs.isLate()) possibleDesires.Add(Desire.Leave);
+                                if (gs.isLate()) possibleDesires.Add(Desire.Leave);
+                                if (gs.isVeryLate()) possibleDesires.Add(Desire.Leave);
+                                if (gs.isVeryLate()) possibleDesires.Add(Desire.Leave);
+                                if (gs.isVeryLate()) possibleDesires.Add(Desire.Leave);
+                                if (gs.isVeryLate()) possibleDesires.Add(Desire.Leave);
                             }
                             break;
                         default:
-                            possibleDesires = {DesireNothing}
+                            possibleDesires = new List<Desire>() {Desire.Nothing};
+                            break;
                     };
-                    int desireIndex = Random.Next(0, possibleDesires.length)
-                    Desire = possibleDesires[desireIndex];
+                    int desireIndex = Random.Range(0, possibleDesires.Count);
+                    MyDesire = possibleDesires[desireIndex];
                 };
                 //
                 // change action based on desire
                 //
-                switch (Desire)
+                switch (MyDesire)
                 {
-                    case DesireTalk:
+                    case Desire.Talk:
                         if (distanceToNearestGuest <= AdjacentDistance) {
-                            Action = Conversation;
-                            Desire = DesireNothing;
+                            MyAction = Action.Conversation;
+                            MyDesire = Desire.Nothing;
                         } else {
-                            Action = Seeking;
+                            MyAction = Action.Seeking;
                             // TODO: add logic for choosing target
                         };
                         break;
-                    case DesireDance:
+                    case Desire.Dance:
                         if (distanceToNearestBar <= NearDistance) {
-                            Action = Dance;
-                            Desire = DesireNothing;
+                            MyAction = Action.Dancing;
+                            MyDesire = Desire.Nothing;
                         } else {
-                            Action = Seeking;
+                            MyAction = Action.Seeking;
                             // TODO: add logic for choosing target
                         };
                         break;
-                    case DesireDrink:
+                    case Desire.Drink:
                         if (distanceToNearestBar <= AdjacentDistance) {
-                            Action = Drinking;
-                            Desire = DesireNothing;
+                            MyAction = Action.Drinking;
+                            MyDesire = Desire.Nothing;
                             // TODO: handle drink purchase
                         } else {
-                            Action = Seeking;
+                            MyAction = Action.Seeking;
                             // TODO: add logic for choosing target
                         };
                         break;
-                    case DesireLeave:
+                    case Desire.Leave:
                         if (distanceToFrontDoor <= AdjacentDistance) {
                             // TODO: handle "exit" of guest
-                            Action = Idle;
+                            MyAction = Action.Idle;
                             // we do NOT reset desire once the desire to leave starts
-                        }
-                            Action = Seeking;
+                        } else {
+                            MyAction = Action.Seeking;
                             // TODO: add logic for choosing target
                         };
                         break;
                     default:
-                        Action = Idle;
-                        Desire = DesireNothing;
+                        MyAction = Action.Idle;
+                        MyDesire = Desire.Nothing;
+                        break;
                 }
                 //
-                // change animation based on Action
+                // change animation based on action
                 //
-                switch (Action) {
-                    case Conversation:
-                        CurrentAnimation = AnimIdle;
+                switch (MyAction) {
+                    case Action.Conversation:
+                        MyAnimation = AnimationStyle.Idle;
                         MovementSpeed = 0;
                         break;
-                    case Wander:
-                    case Seeking:
+                    case Action.Seeking:
                         if (InebriationLevel >= 3) {
-                            CurrentAnimation = AnimMovingDrunk;
+                            MyAnimation = AnimationStyle.MovingDrunk;
                             MovementSpeed = 2;
                         } else {
-                            CurrentAnimation = AnimMovingSober;
+                            MyAnimation = AnimationStyle.MovingSober;
                             MovementSpeed = 3;
                         }
                         break;
-                    case Drinking:
-                        CurrentAnimation = AnimDrinking;
+                    case Action.Drinking:
+                        MyAnimation = AnimationStyle.Drinking;
                         MovementSpeed = 0;
                         break;
-                    case MixingDrink: // only done by bartender (if we make one)
-                        CurrentAnimation = AnimMixing;
+                    case Action.MixingDrink: // only done by bartender (if we make one)
+                        MyAnimation = AnimationStyle.Mixing;
                         MovementSpeed = 0;
                         break;
-                    case Serving: // only done by bartender (if we make one)
-                        CurrentAnimation = AnimServing;
+                    case Action.Serving: // only done by bartender (if we make one)
+                        MyAnimation = AnimationStyle.Serving;
                         MovementSpeed = 0;
                         break;
-                    case Dancing:
-                        CurrentAnimation = AnimDancing;
+                    case Action.Dancing:
+                        MyAnimation = AnimationStyle.Dancing;
                         MovementSpeed = 0;
                         break;
-                    case Leaving:
+                    case Action.Leaving:
                         if (gs.isMorning()) {
-                            CurrentAnimation = AnimRunning;
+                            MyAnimation = AnimationStyle.Running;
                             MovementSpeed = 7;
                         } else {
                             if (InebriationLevel >= 3) {
-                                CurrentAnimation = AnimMovingDrunk;
+                                MyAnimation = AnimationStyle.MovingDrunk;
                                 MovementSpeed = 2;
                             } else {
-                                CurrentAnimation = AnimMovingSober;
+                                MyAnimation = AnimationStyle.MovingSober;
                                 MovementSpeed = 3;
                             }
                         }
                         break;
-                    case Screaming:
-                        CurrentAnimation = AnimAnger;
+                    case Action.Screaming:
+                        MyAnimation = AnimationStyle.Anger;
                         MovementSpeed = 0;
                         break;
-                    case Flirting: // Only done by player
-                    case Cleaning: // Only done by player
-                        CurrentAnimation = AnimIdle; 
+                    case Action.Flirting: // Only done by player
+                    case Action.Cleaning: // Only done by player
+                        MyAnimation = AnimationStyle.Idle; 
                         MovementSpeed = 0;
                         break;
                     default:
+                        break;
                 }
             };
             //
