@@ -655,6 +655,7 @@ PlayerSettings:
       daydreamIconForeground: {fileID: 0}
       daydreamIconBackground: {fileID: 0}
   cloudServicesEnabled:
+    Collab: 0
     UNet: 1
   luminIcon:
     m_Name: 
@@ -668,10 +669,10 @@ PlayerSettings:
     m_VersionCode: 1
     m_VersionName: 
   apiCompatibilityLevel: 6
-  cloudProjectId: 
+  cloudProjectId: 58592052-2b24-4793-91bf-b13cb150687f
   framebufferDepthMemorylessMode: 0
-  projectName: 
-  organizationId: 
+  projectName: PartyCentral
+  organizationId: lorddominotwain
   cloudEnabled: 0
   enableNativePlatformBackendsForNewInputSystem: 0
   disableOldInputManagerSupport: 0
